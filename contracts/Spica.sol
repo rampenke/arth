@@ -1,10 +1,12 @@
 pragma solidity ^0.6.6;
 
+// SPDX-License-Identifier: MIT
+
 import "./aave/FlashLoanReceiverBase.sol";
 import "./aave/ILendingPoolAddressesProvider.sol";
 import "./aave/ILendingPool.sol";
 
-contract Flashloan is FlashLoanReceiverBase {
+contract Spica is FlashLoanReceiverBase {
 
     // Events
     event borrowMade(address _reserve, uint256 _amount , uint256 _value);
@@ -31,7 +33,7 @@ contract Flashloan is FlashLoanReceiverBase {
         // Your logic goes here.
         // !! Ensure that *this contract* has enough of `_reserve` funds to payback the `_fee` !!
         //
-        emit tradeMade(token.balanceOf(address(this)));
+        //emit tradeMade(token.balanceOf(address(this)));
         uint totalDebt = _amount.add(_fee);
         transferFundsBackToPoolInternal(_reserve, totalDebt);
     }
