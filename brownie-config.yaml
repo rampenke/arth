@@ -4,4 +4,4 @@ reports:
   exclude_contracts:
     - SafeMath
 networks:
-    default: kovan
+    default: mainnet
