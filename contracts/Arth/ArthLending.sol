@@ -19,6 +19,7 @@ import "OpenZeppelin/openzeppelin-contracts@3.0.0/contracts/token/ERC20/SafeERC2
 import "OpenZeppelin/openzeppelin-contracts@3.0.0/contracts/token/ERC20/IERC20.sol";
 import "OpenZeppelin/openzeppelin-contracts@3.0.0/contracts/math/SafeMath.sol";
 import "./IFlashLoanReceiver.sol";
+import "./Initializable.sol";
 
 contract ReentrancyGuard {
     /// @dev counter to allow mutex lock with only one SSTORE operation
@@ -56,7 +57,7 @@ library EthAddressLib {
     }
 }
 
-contract ArthLending is ReentrancyGuard {
+contract ArthLending is ReentrancyGuard, Initializable {
     using SafeERC20 for ERC20;
     using SafeMath for uint256;
     /**
@@ -100,17 +101,23 @@ contract ArthLending is ReentrancyGuard {
     * @param _amount the amount to be deposited
     * @param _timestamp the timestamp of the action
     **/
-    event RedeemUnderlying(
+    event Withdraw(
         address indexed _reserve,
         address indexed _user,
         uint256 _amount,
         uint256 _timestamp
     );
+    
 
     address public lendingAddress;
-
+    uint256 totalFeeBips;           // Bip is 1/10000. 35 0.35% is 
+    
+    // Disable protocol fee
+    //uint256 protocolFeeBips;        // portion of totalFeeBips. 3000 is 30%
+    uint256 private constant FLASHLOAN_FEE_PROTOCOL = 0; //3000;
+    
     /**
-    * @dev only lending pools can use functions affected by this modifier
+    * @dev only lender can use functions affected by this modifier
     **/
     modifier onlyLender {
         require(lendingAddress == msg.sender, "The caller must be a lending pool contract");
@@ -130,11 +137,13 @@ contract ArthLending is ReentrancyGuard {
     /**
     * @dev initializes the Core contract, invoked upon registration on the AddressesProvider
     * @param _lendingAddress the lender's address
+    * @param _totalFeeBips in 1/10000 units. 35 is 0.35%
     **/
 
-    function initialize(address _lendingAddress) public {
-        require(lendingAddress == address(0));
+    function initialize(address _lendingAddress, uint256 _totalFeeBips) public initializer {
+        require(lendingAddress == address(0)); // TODO remove
         lendingAddress = _lendingAddress;
+        totalFeeBips = _totalFeeBips;
     }
 
     /**
@@ -167,18 +176,19 @@ contract ArthLending is ReentrancyGuard {
         /*
         (uint256 totalFeeBips, uint256 protocolFeeBips) = parametersProvider
             .getFlashLoanFeesInBips();
+        */
         //calculate amount fee
         uint256 amountFee = _amount.mul(totalFeeBips).div(10000);
 
+        // Disable protocol fee and allow 0 lender fee
         //protocol fee is the part of the amountFee reserved for the protocol - the rest goes to depositors
-        uint256 protocolFee = amountFee.mul(protocolFeeBips).div(10000);
+        //uint256 protocolFee = amountFee.mul(FLASHLOAN_FEE_PROTOCOL).div(10000);
+        /*
         require(
             amountFee > 0 && protocolFee > 0,
             "The requested amount is too small for a flashLoan."
         );
         */
-        uint256 amountFee = 0;
-        uint256 protocolFee = 0;
 
         //get the FlashLoanReceiver instance
         IFlashLoanReceiver receiver = IFlashLoanReceiver(_receiver);
@@ -203,6 +213,8 @@ contract ArthLending is ReentrancyGuard {
             availableLiquidityAfter == availableLiquidityBefore.add(amountFee),
             "The actual balance of the protocol is inconsistent"
         );
+
+        // Disable protocol fee
         /*
         core.updateStateOnFlashLoan(
             _reserve,
@@ -212,7 +224,7 @@ contract ArthLending is ReentrancyGuard {
         );
         */
         //solium-disable-next-line
-        emit FlashLoan(_receiver, _reserve, _amount, amountFee, protocolFee, block.timestamp);
+        emit FlashLoan(_receiver, _reserve, _amount, amountFee, 0, block.timestamp);
     }
 
     /**
@@ -340,12 +352,10 @@ contract ArthLending is ReentrancyGuard {
     * @dev Redeems the underlying amount of assets requested by _user.
     * This function is executed by the overlying aToken contract in response to a redeem action.
     * @param _reserve the address of the reserve
-    * @param _user the address of the user performing the action
     * @param _amount the underlying amount to be redeemed
     **/
-    function redeemUnderlying(
+    function withdraw(
         address _reserve,
-        address payable _user,
         uint256 _amount,
         uint256 _aTokenBalanceAfterRedeem
     )
@@ -360,15 +370,15 @@ contract ArthLending is ReentrancyGuard {
         uint256 currentAvailableLiquidity = getReserveAvailableLiquidity(_reserve);
         require(
             currentAvailableLiquidity >= _amount,
-            "There is not enough liquidity available to redeem"
+            "There is not enough liquidity available to withdraw"
         );
 
         //core.updateStateOnRedeem(_reserve, _user, _amount, _aTokenBalanceAfterRedeem == 0);
 
         //core.transferToUser(_reserve, _user, _amount);
-        transferToUser(_reserve, _user, _amount);
+        transferToUser(_reserve, msg.sender, _amount);
 
         //solium-disable-next-line
-        emit RedeemUnderlying(_reserve, _user, _amount, block.timestamp);
+        emit Withdraw(_reserve, msg.sender, _amount, block.timestamp);
     }    
 }
