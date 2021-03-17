@@ -156,16 +156,14 @@ contract ArthLending is ReentrancyGuard, Initializable {
     **/        
     function flashLoan(address _receiver, address _reserve, uint256 _amount, bytes memory _params)
         public
+        payable 
         nonReentrant
-        //onlyActiveReserve(_reserve) // TODO
         onlyAmountGreaterThanZero(_amount)
     {
         //check that the reserve has enough available liquidity
         //we avoid using the getAvailableLiquidity() function in LendingPoolCore to save gas
         uint256 availableLiquidityBefore = _reserve == EthAddressLib.ethAddress()
-            //? address(core).balance
             ? address(this).balance
-            //: IERC20(_reserve).balanceOf(address(core));
             : IERC20(_reserve).balanceOf(address(this));
 
         require(
@@ -173,22 +171,8 @@ contract ArthLending is ReentrancyGuard, Initializable {
             "There is not enough liquidity available to borrow"
         );
 
-        /*
-        (uint256 totalFeeBips, uint256 protocolFeeBips) = parametersProvider
-            .getFlashLoanFeesInBips();
-        */
         //calculate amount fee
         uint256 amountFee = _amount.mul(totalFeeBips).div(10000);
-
-        // Disable protocol fee and allow 0 lender fee
-        //protocol fee is the part of the amountFee reserved for the protocol - the rest goes to depositors
-        //uint256 protocolFee = amountFee.mul(FLASHLOAN_FEE_PROTOCOL).div(10000);
-        /*
-        require(
-            amountFee > 0 && protocolFee > 0,
-            "The requested amount is too small for a flashLoan."
-        );
-        */
 
         //get the FlashLoanReceiver instance
         IFlashLoanReceiver receiver = IFlashLoanReceiver(_receiver);
@@ -196,17 +180,20 @@ contract ArthLending is ReentrancyGuard, Initializable {
         address payable userPayable = address(uint160(_receiver));
 
         //transfer funds to the receiver
-        //core.transferToUser(_reserve, userPayable, _amount);
-        transferToUser(_reserve, userPayable, _amount);
 
+        if (_reserve != EthAddressLib.ethAddress()) {
+            ERC20(_reserve).safeTransfer(userPayable, _amount);
+        } else {
+            //solium-disable-next-line
+            (bool result, ) = userPayable.call.value(_amount).gas(50000)("");
+            require(result, "Transfer of ETH failed");
+        }
         //execute action of the receiver
         receiver.executeOperation(_reserve, _amount, amountFee, _params);
 
         //check that the actual balance of the core contract includes the returned amount
         uint256 availableLiquidityAfter = _reserve == EthAddressLib.ethAddress()
-            //? address(core).balance
             ? address(this).balance
-            //: IERC20(_reserve).balanceOf(address(core));
             : IERC20(_reserve).balanceOf(address(this));
 
         require(
@@ -214,15 +201,6 @@ contract ArthLending is ReentrancyGuard, Initializable {
             "The actual balance of the protocol is inconsistent"
         );
 
-        // Disable protocol fee
-        /*
-        core.updateStateOnFlashLoan(
-            _reserve,
-            availableLiquidityBefore,
-            amountFee.sub(protocolFee),
-            protocolFee
-        );
-        */
         //solium-disable-next-line
         emit FlashLoan(_receiver, _reserve, _amount, amountFee, 0, block.timestamp);
     }
@@ -248,7 +226,7 @@ contract ArthLending is ReentrancyGuard, Initializable {
             ERC20(_reserve).safeTransfer(_user, _amount);
         } else {
             //solium-disable-next-line
-            (bool result, ) = _user.call.value(_amount).gas(50000)("");
+            (bool result, ) = _user.call{value: _amount, gas: 100000}("");
             require(result, "Transfer of ETH failed");
         }
     }    
@@ -381,4 +359,12 @@ contract ArthLending is ReentrancyGuard, Initializable {
         //solium-disable-next-line
         emit Withdraw(_reserve, msg.sender, _amount, block.timestamp);
     }    
+
+
+    fallback() external payable {
+        //only contracts can send ETH to the core
+        //require(msg.sender.isContract(), "Only contracts can send ether to the Lending pool core");
+
+    }
+
 }
